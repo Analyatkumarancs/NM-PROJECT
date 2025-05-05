@@ -1,42 +1,43 @@
 import os
 import cv2
 import tensorflow as tf
-from keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 import matplotlib.pyplot as plt
+import json
 
-# ✅ Define dataset paths
+# ✅ Verify dataset paths
 train_dir = 'modified-dataset/train'
 val_dir = 'modified-dataset/val'
 
-# ✅ Verify directories exist
-if not os.path.isdir(train_dir):
-    raise FileNotFoundError(f"❌ Training directory does not exist: {train_dir}")
-if not os.path.isdir(val_dir):
-    raise FileNotFoundError(f"❌ Validation directory does not exist: {val_dir}")
+if not os.path.isdir(train_dir) or not os.path.isdir(val_dir):
+    raise FileNotFoundError("❌ One or both dataset directories are missing.")
+
 print("✅ Dataset directories verified.")
 
-# ✅ OPTIONAL: Preview 5 sample images using OpenCV
-sample_class_dir = os.path.join(train_dir, os.listdir(train_dir)[1])  # Pick the first class folder
-image_files = [os.path.join(sample_class_dir, f) for f in os.listdir(sample_class_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+# ✅ Preview 5 sample images
+sample_class_dir = os.path.join(train_dir, os.listdir(train_dir)[0])
+image_files = [os.path.join(sample_class_dir, f)
+               for f in os.listdir(sample_class_dir)
+               if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
 
 print(f"Showing 5 sample images from: {sample_class_dir}")
+plt.figure(figsize=(12, 3))
 for i, img_path in enumerate(image_files[:5]):
-    img = cv2.imread(img_path)  # Read image using OpenCV
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB for display
+    img = cv2.imread(img_path)
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     plt.subplot(1, 5, i+1)
     plt.imshow(img_rgb)
     plt.axis('off')
     plt.title(f"Image {i+1}")
-
 plt.tight_layout()
 plt.show()
 
-# ✅ Image data generators
+# ✅ Data Generators
 train_datagen = ImageDataGenerator(
     rescale=1./255,
     shear_range=0.2,
@@ -45,7 +46,6 @@ train_datagen = ImageDataGenerator(
 )
 val_datagen = ImageDataGenerator(rescale=1./255)
 
-# ✅ Load image datasets
 train_data = train_datagen.flow_from_directory(
     train_dir,
     target_size=(224, 224),
@@ -59,25 +59,28 @@ val_data = val_datagen.flow_from_directory(
     class_mode='categorical'
 )
 
-# ✅ Build the model using ResNet50
+# ✅ Save class indices
+with open("class_indices.json", "w") as f:
+    json.dump(train_data.class_indices, f)
+print("✅ Class indices saved to class_indices.json")
+
+# ✅ Build ResNet50 model
 base_model = ResNet50(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-for layer in base_model.layers:
-    layer.trainable = False  # Freeze base model
+base_model.trainable = False
 
 model = Sequential([
     base_model,
     GlobalAveragePooling2D(),
     Dense(256, activation='relu'),
-    Dense(train_data.num_classes, activation='softmax')  # Output layer for multi-class
+    Dense(train_data.num_classes, activation='softmax')
 ])
 
-# ✅ Compile the model
 model.compile(optimizer=Adam(), loss='categorical_crossentropy', metrics=['accuracy'])
 
-# ✅ Add early stopping to avoid overfitting
+# ✅ Early stopping
 early_stopping = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
 
-# ✅ Train the model
+# ✅ Train model
 history = model.fit(
     train_data,
     epochs=10,
@@ -85,26 +88,32 @@ history = model.fit(
     callbacks=[early_stopping]
 )
 
-# ✅ Evaluate on validation data
+# ✅ Evaluate model
 loss, accuracy = model.evaluate(val_data)
-print(f"\n✅ Model Accuracy on Validation Set: {accuracy * 100:.2f}%")
+print(f"\n✅ Final Validation Accuracy: {accuracy * 100:.2f}%")
 
-# ✅ Plot training vs. validation accuracy
-plt.figure(figsize=(10, 4))
+# ✅ Save model
+model.save("e_waste_classifier_resnet50.h5")
+print("✅ Model saved to e_waste_classifier_resnet50.h5")
+
+# ✅ Plot accuracy & loss
+plt.figure(figsize=(12, 5))
+
+# Accuracy plot
 plt.subplot(1, 2, 1)
 plt.plot(history.history['accuracy'], label='Train Acc')
 plt.plot(history.history['val_accuracy'], label='Val Acc')
-plt.title('Accuracy')
-plt.xlabel('Epochs')
+plt.title('Model Accuracy')
+plt.xlabel('Epoch')
 plt.ylabel('Accuracy')
 plt.legend()
 
-# ✅ Plot training vs. validation loss
+# Loss plot
 plt.subplot(1, 2, 2)
 plt.plot(history.history['loss'], label='Train Loss')
 plt.plot(history.history['val_loss'], label='Val Loss')
-plt.title('Loss')
-plt.xlabel('Epochs')
+plt.title('Model Loss')
+plt.xlabel('Epoch')
 plt.ylabel('Loss')
 plt.legend()
 
